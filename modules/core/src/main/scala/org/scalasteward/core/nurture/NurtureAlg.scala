@@ -137,23 +137,23 @@ final class NurtureAlg[F[_]](config: ForgeCfg)(implicit
     logger.attemptWarn.label_(
       s"Closing obsolete PR ${oldPr.url.renderString} for ${oldPr.update.show}"
     ) {
+      val oldRemoteBranch = oldPr.updateBranch.withPrefix("origin/")
       for {
-        _ <- pullRequestRepository.changeState(data.repo, oldPr.url, PullRequestState.Closed)
-        comment = config.tpe match {
-          // If a PR is part of a list element, GitHub renders its title
-          case GitHub => s"""|Superseded by
-                             |- ${forgeApiAlg.referencePullRequest(newNumber)}
-                             |""".stripMargin.trim
-          case _ => s"Superseded by ${forgeApiAlg.referencePullRequest(newNumber)}."
-        }
-        _ <- forgeApiAlg.commentPullRequest(data.repo, oldPr.number, comment)
-        oldRemoteBranch = oldPr.updateBranch.withPrefix("origin/")
         oldBranchExists <- gitAlg.branchExists(data.repo, oldRemoteBranch)
         authors <-
           if (oldBranchExists) gitAlg.branchAuthors(data.repo, oldRemoteBranch, data.baseBranch)
           else List.empty.pure[F]
         _ <- F.whenA(authors.size <= 1) {
-          forgeApiAlg.closePullRequest(data.repo, oldPr.number) >>
+          val comment = config.tpe match {
+            // If a PR is part of a list element, GitHub renders its title
+            case GitHub => s"""|Superseded by
+                               |- ${forgeApiAlg.referencePullRequest(newNumber)}
+                               |""".stripMargin.trim
+            case _ => s"Superseded by ${forgeApiAlg.referencePullRequest(newNumber)}."
+          }
+          forgeApiAlg.commentPullRequest(data.repo, oldPr.number, comment) >>
+            forgeApiAlg.closePullRequest(data.repo, oldPr.number) >>
+            pullRequestRepository.changeState(data.repo, oldPr.url, PullRequestState.Closed) >>
             deleteRemoteBranch(data.repo, oldPr.updateBranch)
         }
       } yield ()
